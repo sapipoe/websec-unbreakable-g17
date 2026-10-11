@@ -2,7 +2,9 @@
 # HOOFDWORKFLOW: dit is de ENIGE workflow met een trigger (on: push).
 # Hij roept de drie scans aan als "reusable workflows" (bestanden met on: workflow_call).
 #
-# hoofd yml voor de scans zodat alles is mooi opgedeeld
+# Stap 2c: de scans BLOKKEREN bij een nieuwe kritieke bevinding (zie elk scanbestand).
+# Stap 3 : hier komt later een deploy-job bij met  needs: [secrets, sca, sast]
+#          zodat er enkel uitgerold wordt als ALLE scans geslaagd zijn.
 
 name: pipeline
 

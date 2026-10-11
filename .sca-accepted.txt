@@ -1,0 +1,3 @@
+# Aanvaarde SCA-bevindingen (NuGet) - de reden staat in docs/accepted-findings.md
+# Eén advisory-URL per regel, exact zoals in de uitvoer van "dotnet list package --vulnerable".
+https://github.com/advisories/GHSA-5crp-9r3c-p9vr
