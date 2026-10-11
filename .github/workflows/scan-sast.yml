@@ -1,74 +1,45 @@
-# .github/workflows/scan-sca.yml
-# SCA (Software Composition Analysis): bibliotheken met gekende lekken (CVE's)
+# .github/workflows/scan-sast.yml
+# SAST (Static Application Security Testing) met Semgrep
 # DSOMM: Test and Verification > Static depth for applications >
-#        "Software Composition Analysis (server side)"  -> NuGet-pakketten
-#        "Software Composition Analysis (client side)"  -> jQuery/Bootstrap
+#        "Static analysis for important server side components"  -> C# API
+#        "Static analysis for important client side components"  -> SPA (wwwroot/js)
 #
-# KRITIEK = severity High of Critical.
-#  - server side: aanvaarde lekken staan in .sca-accepted.txt (root van de repo).
-#    Het script .github/scripts/sca-nuget-gate.sh laat de job falen bij een
-#    High/Critical-lek dat NIET in die lijst staat.
-#  - client side: retire.js met --severity high faalt enkel bij High of hoger.
-#    De Medium-lekken van jQuery en Bootstrap blokkeren dus niet.
+# KRITIEK = severity ERROR.
+# De eerste run vond geen enkele ERROR (enkel 1 WARNING), dus er is niets te
+# aanvaarden. Elke nieuwe ERROR laat de pipeline falen.
 
-name: scan-sca
+name: scan-sast
 
 on:
   workflow_call:
 
 jobs:
-  server-side:
-    name: NuGet (server side)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "10.0.x"
-
-      - name: Restore (exact volgens packages.lock.json)
-        run: dotnet restore app/Unbreakable.csproj --locked-mode
-
-      - name: Rapport maken
-        run: |
-          # leesbare versie (voor in de log en het artifact)
-          dotnet list app/Unbreakable.csproj package --vulnerable --include-transitive | tee sca-nuget.txt
-          # JSON-versie (voor het controlescript)
-          dotnet list app/Unbreakable.csproj package --vulnerable --include-transitive --format json > sca-nuget.json
-
-      # GATE: faalt bij een NIEUW High/Critical-lek
-      - name: Controle op nieuwe kritieke bevindingen
-        run: bash .github/scripts/sca-nuget-gate.sh sca-nuget.json .sca-accepted.txt
-
-      - name: Rapport bewaren
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: sca-nuget-report
-          path: |
-            sca-nuget.txt
-            sca-nuget.json
-
-  client-side:
-    name: retire.js (client side)
+  semgrep:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Rapport maken (alle severities)
         run: |
-          npx --yes retire@5 --path app/wwwroot/lib \
-            --outputformat json --outputpath sca-retire.json || true
-          # "|| true": dit is enkel het rapport, de blokkering gebeurt in de volgende stap
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep \
+            semgrep scan --metrics=off \
+            --config p/csharp --config p/javascript \
+            --exclude app/wwwroot/lib \
+            --json --output semgrep.json
+          # zonder --error: dit is enkel het rapport, de blokkering gebeurt in de volgende stap
 
-      # GATE: --severity high -> faalt (exit code 13) enkel bij High of hoger
+      # GATE: --severity ERROR -> enkel ERROR-regels; --error -> exit code 1 als er iets gevonden wordt
       - name: Controle op kritieke bevindingen
-        run: npx --yes retire@5 --path app/wwwroot/lib --severity high
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep \
+            semgrep scan --metrics=off \
+            --config p/csharp --config p/javascript \
+            --exclude app/wwwroot/lib \
+            --severity ERROR --error
 
       - name: Rapport bewaren
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sca-retire-report
-          path: sca-retire.json
+          name: sast-report
+          path: semgrep.json
