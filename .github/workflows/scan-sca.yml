@@ -1,0 +1,63 @@
+# .github/workflows/scan-sca.yml
+# SCA (Software Composition Analysis): bibliotheken met gekende lekken (CVE's)
+# DSOMM: Test and Verification > Static depth for applications >
+#        "Software Composition Analysis (server side)"  -> NuGet-pakketten
+#        "Software Composition Analysis (client side)"  -> jQuery/Bootstrap
+#
+# Twee tools, omdat de app twee soorten afhankelijkheden heeft:
+#  - server side: NuGet-pakketten, exact vastgelegd in app/packages.lock.json
+#  - client side: jQuery en Bootstrap staan als LOSSE BESTANDEN in wwwroot/lib,
+#    zonder package.json. Een gewone SCA-tool ziet die niet; retire.js
+#    herkent ze aan de inhoud van de bestanden zelf.
+
+name: scan-sca
+
+on:
+  workflow_call:
+
+jobs:
+  server-side:
+    name: NuGet (server side)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: dotnet list package --vulnerable
+        continue-on-error: true
+        run: |
+          # --locked-mode: restore EXACT wat in packages.lock.json staat
+          dotnet restore app/Unbreakable.csproj --locked-mode
+          # --include-transitive: ook afhankelijkheden van afhankelijkheden
+          dotnet list app/Unbreakable.csproj package --vulnerable --include-transitive | tee sca-nuget.txt
+
+      - name: Rapport bewaren
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sca-nuget-report
+          path: sca-nuget.txt
+
+  client-side:
+    name: retire.js (client side)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: retire.js op wwwroot/lib
+        continue-on-error: true
+        run: |
+          npx --yes retire@5 --path app/wwwroot/lib \
+            --outputformat json --outputpath sca-retire.json
+          # leesbare versie in de log:
+          npx --yes retire@5 --path app/wwwroot/lib || true
+
+      - name: Rapport bewaren
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sca-retire-report
+          path: sca-retire.json

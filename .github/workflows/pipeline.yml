@@ -1,0 +1,36 @@
+# .github/workflows/pipeline.yml
+# HOOFDWORKFLOW: dit is de ENIGE workflow met een trigger (on: push).
+# Hij roept de drie scans aan als "reusable workflows" (bestanden met on: workflow_call).
+#
+# hoofd yml voor de scans zodat alles is mooi opgedeeld
+
+name: pipeline
+
+on:
+  push:              # elke push, op elke branch (vereiste van de opdracht)
+  pull_request:      # ook PR's controleren (op GitHub-hosted runners)
+  workflow_dispatch: # handmatig starten vanuit het Actions-tabblad
+
+# Minimale rechten voor de hele run. Een aangeroepen workflow kan
+# NOOIT meer rechten krijgen dan wat hier staat.
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scanning
+    uses: ./.github/workflows/scan-secrets.yml
+
+  sca:
+    name: SCA
+    uses: ./.github/workflows/scan-sca.yml
+
+  sast:
+    name: SAST
+    uses: ./.github/workflows/scan-sast.yml
+
+  # (stap 3) deploy:
+  #   needs: [secrets, sca, sast]
+  #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  #   runs-on: self-hosted
+  #   ...

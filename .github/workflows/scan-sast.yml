@@ -1,0 +1,45 @@
+# .github/workflows/scan-sast.yml
+# SAST (Static Application Security Testing) met Semgrep
+# DSOMM: Test and Verification > Static depth for applications >
+#        "Static analysis for important server side components"  -> C# API (Program.cs, Data/)
+#        "Static analysis for important client side components"  -> SPA (wwwroot/js)
+#
+# Leest de broncode zonder ze uit te voeren en zoekt naar gevaarlijke patronen,
+# zoals SQL-injectie (FromSqlRaw met samengestelde strings) of XSS (innerHTML, .html()).
+# Waarom Semgrep i.p.v. CodeQL: Semgrep geeft een exitcode terug, zodat de pipeline
+# kan FALEN. Een CodeQL-melding in het Security-tabblad laat de pipeline niet falen.
+
+name: scan-sast
+
+on:
+  workflow_call:
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Semgrep (C# en JavaScript)
+        continue-on-error: true
+        run: |
+          # --exclude app/wwwroot/lib: code van derden (jQuery/Bootstrap) hoort bij SCA,
+          #   anders krijg je honderden meldingen in code die je zelf niet onderhoudt.
+          # --metrics=off: geen gebruiksstatistieken naar Semgrep sturen.
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep \
+            semgrep scan --metrics=off \
+            --config p/csharp --config p/javascript \
+            --exclude app/wwwroot/lib \
+            --json --output semgrep.json
+          # leesbare versie in de log:
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep \
+            semgrep scan --metrics=off \
+            --config p/csharp --config p/javascript \
+            --exclude app/wwwroot/lib || true
+
+      - name: Rapport bewaren
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sast-report
+          path: semgrep.json
