@@ -3,8 +3,8 @@
 # Hij roept de drie scans aan als "reusable workflows" (bestanden met on: workflow_call).
 #
 # Stap 2c: de scans BLOKKEREN bij een nieuwe kritieke bevinding (zie elk scanbestand).
-# Stap 3 : hier komt later een deploy-job bij met  needs: [secrets, sca, sast]
-#          zodat er enkel uitgerold wordt als ALLE scans geslaagd zijn.
+# Stap 3 : slagen ALLE scans en is het een push naar main, dan rolt de deploy-job
+#          de app automatisch uit op onze server, via de self-hosted runner.
 
 name: pipeline
 
@@ -31,8 +31,43 @@ jobs:
     name: SAST
     uses: ./.github/workflows/scan-sast.yml
 
-  # (stap 3) deploy:
-  #   needs: [secrets, sca, sast]
-  #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-  #   runs-on: self-hosted
-  #   ...
+  # ---------------------------------------------------------------
+  # DEPLOY naar onze server
+  # ---------------------------------------------------------------
+  deploy:
+    name: Deploy naar server
+    # 1. Wacht tot ALLE drie de scans geslaagd zijn. Faalt er één, dan wordt deze job overgeslagen.
+    needs: [secrets, sca, sast]
+    # 2. Enkel bij een PUSH naar MAIN. Een pull request of een andere branch komt hier nooit.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # 3. Draait op ONZE self-hosted runner op de server (label g17-deploy), niet bij GitHub.
+    #    GitHub kan onze IPv6-only server niet bereiken; de runner belt zelf naar GitHub.
+    runs-on: [self-hosted, g17-deploy]
+    # 4. Nooit twee deploys tegelijk: een tweede push wacht tot de eerste klaar is.
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    steps:
+      - name: Code ophalen
+        uses: actions/checkout@v4
+
+      - name: App bouwen en starten
+        # -p unbreakable: vaste projectnaam, zodat elke deploy dezelfde containers vervangt
+        # --build: de image opnieuw bouwen met de nieuwe code
+        # -d: op de achtergrond draaien
+        run: docker compose -p unbreakable up -d --build --remove-orphans
+
+      - name: Health check
+        # Controleren of de nieuwe versie echt werkt. Lukt dat niet binnen 60 s, dan faalt de deploy.
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/health; then
+              echo ""
+              echo "De app is online."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::De app reageert niet op /health"
+          docker compose -p unbreakable logs --tail 50 app
+          exit 1
