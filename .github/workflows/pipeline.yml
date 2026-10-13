@@ -2,8 +2,6 @@
 # HOOFDWORKFLOW: dit is de ENIGE workflow met een trigger (on: push).
 # Hij roept de drie scans aan als "reusable workflows" (bestanden met on: workflow_call).
 #
-# Stap 2c: de scans BLOKKEREN bij een nieuwe kritieke bevinding (zie elk scanbestand).
-# Stap 3 : slagen ALLE scans en is het een push naar main, dan rolt de deploy-job
 #          de app automatisch uit op onze server, via de self-hosted runner.
 
 name: pipeline
