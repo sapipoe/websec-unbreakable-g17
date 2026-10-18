@@ -55,17 +55,8 @@ jobs:
         # -d: op de achtergrond draaien
         run: docker compose -p unbreakable up -d --build --remove-orphans
 
-      - name: Health check
-        # Controleren of de nieuwe versie echt werkt. Lukt dat niet binnen 60 s, dan faalt de deploy.
-        run: |
-          for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8080/health; then
-              echo ""
-              echo "De app is online."
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::De app reageert niet op /health"
-          docker compose -p unbreakable logs --tail 50 app
-          exit 1
+      - name: Health check (via de WAF)
+        # Controleren of de nieuwe versie online staat, via de WAF op ons domein (poort 8080 is dicht).
+        # -k: het staging-certificaat is niet vertrouwd (in 5d weghalen)
+        # --retry: tot 3 minuten opnieuw proberen, BunkerWeb heeft tijd nodig bij de eerste start
+        run: curl -fsSk --retry 36 --retry-delay 5 --retry-all-errors https://g17.ipv6.thelastgym.be/health
