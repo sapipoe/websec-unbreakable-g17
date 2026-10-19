@@ -59,4 +59,4 @@ jobs:
         # Controleren of de nieuwe versie online staat, via de WAF op ons domein (poort 8080 is dicht).
         # -k: het staging-certificaat is niet vertrouwd (in 5d weghalen)
         # --retry: tot 3 minuten opnieuw proberen, BunkerWeb heeft tijd nodig bij de eerste start
-        run: curl -fsSk --retry 36 --retry-delay 5 --retry-all-errors https://g17.ipv6.thelastgym.be/health
+        run: curl -fsS --retry 36 --retry-delay 5 --retry-all-errors https://g17.ipv6.thelastgym.be/health

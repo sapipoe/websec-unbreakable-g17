@@ -43,12 +43,12 @@ services:
       - bunkerweb
     volumes:
       - bw-storage:/data
-    environment:
+    enviroment:
       BUNKERWEB_INSTANCES: "bunkerweb"
       API_WHITELIST_IP: "127.0.0.0/8 10.20.30.0/24"
       SERVER_NAME: "g17.ipv6.thelastgym.be"
       AUTO_LETS_ENCRYPT: "yes"
-      USE_LETS_ENCRYPT_STAGING: "yes"
+      USE_LETS_ENCRYPT_STAGING: "no"
 
       USE_REVERSE_PROXY: "yes"
       REVERSE_PROXY_URL: "/"
