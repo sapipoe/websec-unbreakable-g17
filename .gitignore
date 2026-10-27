@@ -5,3 +5,10 @@ obj/
 *.user
 *.suo
 .env
+
+*drawio*
+
+# codeboek en de HMAC sleutel worden tussen 2 gebruikers gedeeld en uds niet algemeen bekend
+codeboek*
+*.codebook
+hmac*.key

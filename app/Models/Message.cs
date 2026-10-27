@@ -21,10 +21,20 @@ public class Message
     [Display(Name = "Onderwerp")]
     public string Subject { get; set; }
 
+    // Enkel de ciphertext (modulo 37, A-Z 0-9 _). Nooit het bericht zelf, nooit de sleutel.
     [Required]
     [StringLength(2000)]
-    [Display(Name = "Bericht")]
+    [Display(Name = "Bericht (versleuteld)")]
     public string Body { get; set; }
+
+    // Het nummer van de lijn in het codeboek. Niet geheim: zonder het codeboek zegt het niets.
+    [Display(Name = "Lijn in het codeboek")]
+    public int KeyLine { get; set; }
+
+    // HMAC-SHA256 in hex (64 tekens), berekend in de browser van de verzender.
+    [StringLength(64)]
+    [Display(Name = "MAC")]
+    public string Mac { get; set; }
 
     [Display(Name = "Verzonden")]
     public DateTime SentAt { get; set; }

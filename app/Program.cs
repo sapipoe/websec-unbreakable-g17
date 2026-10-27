@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json;
 using Unbreakable.Data;
@@ -25,6 +26,12 @@ using (var scope = app.Services.CreateScope())
         try
         {
             context.Database.EnsureCreated();
+            // EnsureCreated maakt geen nieuwe kolommen aan in een bestaande databank.
+            // Voor opdracht 3 voegen we ze zelf toe als ze nog niet bestaan.
+            context.Database.ExecuteSqlRaw(
+                "ALTER TABLE \"Messages\" " +
+                "ADD COLUMN IF NOT EXISTS \"KeyLine\" integer NOT NULL DEFAULT 0, " +
+                "ADD COLUMN IF NOT EXISTS \"Mac\" character varying(64) NULL");
             SeedData.Initialize(context);
             break;
         }
@@ -118,6 +125,31 @@ api.MapPost("/messages", async (Message message, HttpRequest request, Unbreakabl
     if (string.IsNullOrEmpty(message.Sender))
     {
         message.Sender = CurrentUser(request);
+    }
+
+    // Opdracht 3: de server kan het bericht niet lezen, maar wel controleren dat er
+    // enkel ciphertext binnenkomt in het verwachte formaat.
+    if (string.IsNullOrEmpty(message.Body) || !Regex.IsMatch(message.Body, "^[A-Z0-9_]{1,40}$"))
+    {
+        return Results.BadRequest("Body moet ciphertext zijn: 1 tot 40 tekens uit A-Z, 0-9 en _.");
+    }
+    if (message.KeyLine < 1)
+    {
+        return Results.BadRequest("KeyLine ontbreekt.");
+    }
+    if (string.IsNullOrEmpty(message.Mac) || !Regex.IsMatch(message.Mac, "^[0-9a-f]{64}$"))
+    {
+        return Results.BadRequest("Mac moet een HMAC-SHA256 in hex zijn (64 tekens).");
+    }
+
+    // Een lijn uit het codeboek mag maar één keer gebruikt worden tussen dezelfde twee personen.
+    // Twee keer dezelfde sleutel maakt de one time pad breekbaar (C1 - C2 = P1 - P2).
+    var reused = await db.Messages.AnyAsync(m => m.KeyLine == message.KeyLine &&
+        ((m.Sender == message.Sender && m.Recipient == message.Recipient) ||
+         (m.Sender == message.Recipient && m.Recipient == message.Sender)));
+    if (reused)
+    {
+        return Results.Conflict($"Lijn {message.KeyLine} van het codeboek is al gebruikt tussen deze twee personen. Neem een nieuwe lijn.");
     }
 
     message.Id = 0;

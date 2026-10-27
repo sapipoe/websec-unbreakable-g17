@@ -1,6 +1,7 @@
 // De schermen van Unbreakable. Navigeren gebeurt met het deel na # in de URL.
 
 import { api, currentUser, setUser } from './api.js';
+import * as otp from './crypto.js';
 
 const app = document.getElementById('app');
 
@@ -148,13 +149,56 @@ async function renderMessage(id) {
             <dt class="col-sm-2">Aan</dt><dd class="col-sm-10">${escapeHtml(m.recipient)}</dd>
             <dt class="col-sm-2">Verzonden</dt><dd class="col-sm-10">${formatDate(m.sentAt)}</dd>
         </dl>
-        <div class="card mb-3"><div class="card-body message-body" id="body"></div></div>
+        <h5>Versleuteld bericht</h5>
+        <div class="card mb-3"><div class="card-body message-body text-monospace" id="body"></div></div>
+
+        <div id="decrypt-area">
+            <h5>Ontsleutelen</h5>
+            <p class="text-muted">Lijn <strong id="keyline"></strong> uit het codeboek. Je sleutels blijven in je browser.</p>
+            <form id="decrypt" class="mb-3" autocomplete="off">
+                <div class="form-group">
+                    <label for="otpkey">Sleutel (lijn uit het codeboek)</label>
+                    <input id="otpkey" type="password" class="form-control text-monospace" required />
+                </div>
+                <div class="form-group">
+                    <label for="mackey">HMAC sleutel</label>
+                    <input id="mackey" type="password" class="form-control text-monospace" required />
+                </div>
+                <button type="submit" class="btn btn-primary">Controleren en ontsleutelen</button>
+            </form>
+            <div id="result"></div>
+        </div>
         <p>
             <button id="delete" class="btn btn-outline-danger">Verwijderen</button>
             <a href="#/inbox" class="btn btn-link">Terug naar je inbox</a>
         </p>`;
 
     document.getElementById('body').textContent = m.body;
+    document.getElementById('keyline').textContent = m.keyLine;
+
+    const result = document.getElementById('result');
+    document.getElementById('decrypt').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        result.innerHTML = '';
+        try {
+            // Eerst de MAC controleren, pas daarna ontsleutelen (verify-then-decrypt).
+            const ok = await otp.verify(document.getElementById('mackey').value,
+                { sender: m.sender, recipient: m.recipient, keyLine: m.keyLine, body: m.body }, m.mac);
+            if (!ok) {
+                result.innerHTML = `<div class="alert alert-danger"><strong>MAC klopt niet.</strong>
+                    Het bericht is onderweg of in de databank gewijzigd, of je HMAC sleutel is fout.
+                    We tonen het bericht niet.</div>`;
+                return;
+            }
+            const key = otp.normalizeKey(document.getElementById('otpkey').value);
+            const plain = otp.toReadable(otp.decrypt(m.body, key));
+            result.innerHTML = `<div class="alert alert-success"><strong>MAC is geldig.</strong> Het bericht:</div>
+                <div class="card mb-3"><div class="card-body message-body" id="plain"></div></div>`;
+            document.getElementById('plain').textContent = plain;
+        } catch (error) {
+            result.innerHTML = `<div class="alert alert-danger">${escapeHtml(error.message)}</div>`;
+        }
+    });
 
     document.getElementById('delete').addEventListener('click', async () => {
         if (confirm('Ben je zeker dat je dit bericht wil verwijderen?')) {
@@ -186,12 +230,29 @@ async function renderNew() {
                     <div class="form-group">
                         <label for="subject">Onderwerp</label>
                         <input id="subject" class="form-control" required maxlength="100" />
+                        <small class="form-text text-danger">Het onderwerp wordt niet versleuteld. Zet er niets geheims in.</small>
                     </div>
                     <div class="form-group">
                         <label for="text">Bericht</label>
-                        <textarea id="text" class="form-control" rows="6" required maxlength="2000"></textarea>
+                        <textarea id="text" class="form-control" rows="3" required maxlength="40"></textarea>
+                        <small class="form-text text-muted">Letters, cijfers en spaties. Maximaal zo lang als je sleutel (40 tekens).</small>
                     </div>
-                    <button type="submit" class="btn btn-primary">Versturen</button>
+                    <div class="form-row">
+                        <div class="form-group col-md-3">
+                            <label for="keyline">Lijn nr.</label>
+                            <input id="keyline" type="number" class="form-control" required min="1" max="9999" />
+                        </div>
+                        <div class="form-group col-md-9">
+                            <label for="otpkey">Sleutel (die lijn uit het codeboek)</label>
+                            <input id="otpkey" type="password" class="form-control text-monospace" required autocomplete="off" />
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="mackey">HMAC sleutel</label>
+                        <input id="mackey" type="password" class="form-control text-monospace" required autocomplete="off" />
+                    </div>
+                    <div id="error"></div>
+                    <button type="submit" class="btn btn-primary">Versleutelen en versturen</button>
                     <a href="#/inbox" class="btn btn-link">Annuleren</a>
                 </form>
             </div>
@@ -199,12 +260,24 @@ async function renderNew() {
 
     document.getElementById('compose').addEventListener('submit', async (event) => {
         event.preventDefault();
-        await api.send({
-            recipient: document.getElementById('recipient').value.trim(),
-            subject: document.getElementById('subject').value,
-            body: document.getElementById('text').value,
-        });
-        location.hash = '#/inbox';
+        const error = document.getElementById('error');
+        error.innerHTML = '';
+        try {
+            const plain = otp.normalizeMessage(document.getElementById('text').value);
+            const key = otp.normalizeKey(document.getElementById('otpkey').value);
+            const message = {
+                sender: currentUser(),
+                recipient: document.getElementById('recipient').value.trim(),
+                subject: document.getElementById('subject').value,
+                keyLine: Number(document.getElementById('keyline').value),
+                body: otp.encrypt(plain, key),     // enkel de ciphertext gaat naar de server
+            };
+            message.mac = await otp.sign(document.getElementById('mackey').value, message);
+            await api.send(message);
+            location.hash = '#/inbox';
+        } catch (e) {
+            error.innerHTML = `<div class="alert alert-danger">${escapeHtml(e.message)}</div>`;
+        }
     });
 }
 
