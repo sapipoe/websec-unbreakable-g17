@@ -23,6 +23,7 @@ bevinding doet dat wel.
 |---|---|---|---|---|---|---|
 | 1 | Gitleaks | API key `Notifications.ApiKey` in `app/appsettings.json:15` | **Echt probleem**: een geheim hoort niet in de repo | Het endpoint is `push.unbreakable.example`. `.example` is een gereserveerd domein dat nooit bestaat, dus de key werkt nergens. | Opdracht 6 (secrets manager, dreiging #5) | `.gitleaksignore` |
 | 2 | dotnet (SCA server side) | `Newtonsoft.Json 12.0.1`, High, [GHSA-5crp-9r3c-p9vr](https://github.com/advisories/GHSA-5crp-9r3c-p9vr) | **Echt lek in de library, niet bereikbaar in de app** | Het lek zit in het *inlezen* van diep geneste JSON. De app gebruikt Newtonsoft enkel in `Program.cs:106` om eigen data te *schrijven* (`SerializeObject`). | Update naar 13.0.1 of hoger | `.sca-accepted.txt` |
+| 3 | Gitleaks | `generic-api-key` in `docker-compose.yml:32` (`KC_DB_URL`), commit `e027d42` (opdracht 4) | **False positive**: de regel slaat aan op het woord "key" in de servicenaam `keycloak-db` | De waarde is een JDBC-URL met enkel host, poort en databanknaam. Het wachtwoord staat apart in `KC_DB_PASSWORD` en komt uit de GitHub secrets. | Niets op te lossen | `.gitleaksignore` |
 
 ## Niet-kritieke bevindingen (ter info)
 
