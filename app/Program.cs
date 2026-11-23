@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using Newtonsoft.Json;
 using Unbreakable.Data;
 using Unbreakable.Models;
@@ -8,6 +10,46 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<UnbreakableContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Unbreakable")));
+
+// Opdracht 4: wie je bent, komt uit het access token van Keycloak.
+// De API controleert elk token zelf: handtekening, issuer, audience en geldigheidsduur.
+var oidc = builder.Configuration.GetSection("Oidc");
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        // De publieke sleutels van Keycloak halen we over het interne Docker-netwerk,
+        // niet via het internet. Daarom http: dit verkeer verlaat de server niet.
+        options.MetadataAddress = oidc["MetadataAddress"];
+        options.RequireHttpsMetadata = false;
+
+        // Claims laten zoals ze in het token staan ("sub" blijft "sub").
+        options.MapInboundClaims = false;
+
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            // 1. Handtekening: enkel RS256, met de publieke sleutel van Keycloak.
+            ValidateIssuerSigningKey = true,
+            RequireSignedTokens = true,
+            ValidAlgorithms = new[] { SecurityAlgorithms.RsaSha256 },
+
+            // 2. Issuer: exact onze realm, op het publieke adres.
+            ValidateIssuer = true,
+            ValidIssuer = oidc["Issuer"],
+
+            // 3. Audience: het token moet voor deze API bedoeld zijn.
+            ValidateAudience = true,
+            ValidAudience = oidc["Audience"],
+
+            // 4. Geldigheidsduur: niet verlopen, met hoogstens 30 seconden speling op de klok.
+            ValidateLifetime = true,
+            RequireExpirationTime = true,
+            ClockSkew = TimeSpan.FromSeconds(30),
+
+            // De gebruiker is de claim "sub": altijd aanwezig, uniek en nooit hergebruikt.
+            NameClaimType = "sub",
+        };
+    });
+builder.Services.AddAuthorization();
 
 builder.Services.AddCors(options =>
     options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
@@ -32,6 +74,11 @@ using (var scope = app.Services.CreateScope())
                 "ALTER TABLE \"Messages\" " +
                 "ADD COLUMN IF NOT EXISTS \"KeyLine\" integer NOT NULL DEFAULT 0, " +
                 "ADD COLUMN IF NOT EXISTS \"Mac\" character varying(64) NULL");
+            // Opdracht 4: tabel die de sub uit het token koppelt aan een leesbare naam.
+            context.Database.ExecuteSqlRaw(
+                "CREATE TABLE IF NOT EXISTS \"Users\" (" +
+                "\"Id\" character varying(64) NOT NULL PRIMARY KEY, " +
+                "\"Username\" character varying(100) NOT NULL)");
             SeedData.Initialize(context);
             break;
         }
@@ -50,16 +97,38 @@ app.UseCors();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
+app.UseAuthentication();
+app.UseAuthorization();
+
+// Opdracht 4: bij elk verzoek met een geldig token bewaren we welke naam bij welke sub hoort.
+// Zo kan je een bericht naar "bram" sturen terwijl de API zijn sub opslaat.
+app.Use(async (context, next) =>
+{
+    var sub = context.User.FindFirst("sub")?.Value;
+    if (!string.IsNullOrEmpty(sub))
+    {
+        var username = context.User.FindFirst("preferred_username")?.Value ?? sub;
+        var db = context.RequestServices.GetRequiredService<UnbreakableContext>();
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"Users\" (\"Id\", \"Username\") VALUES ({sub}, {username}) ON CONFLICT (\"Id\") DO UPDATE SET \"Username\" = EXCLUDED.\"Username\"");
+    }
+    await next();
+});
+
 app.MapGet("/health", () => "ok");
 
-// De API. Wie je bent, staat voorlopig in de header X-User.
-var api = app.MapGroup("/api");
+// De API. Elk verzoek moet een geldig access token hebben (header Authorization: Bearer ...).
+// De header X-User bestaat niet meer.
+var api = app.MapGroup("/api").RequireAuthorization();
 
+// Alle gebruikers die al eens ingelogd hebben: sub (id) en leesbare naam.
 api.MapGet("/users", async (UnbreakableContext db) =>
 {
-    var senders = await db.Messages.Select(m => m.Sender).Distinct().ToListAsync();
-    var recipients = await db.Messages.Select(m => m.Recipient).Distinct().ToListAsync();
-    return Results.Ok(senders.Union(recipients).OrderBy(name => name).ToList());
+    var users = await db.Users
+        .OrderBy(u => u.Username)
+        .Select(u => new { id = u.Id, username = u.Username })
+        .ToListAsync();
+    return Results.Ok(users);
 });
 
 api.MapGet("/messages", async (HttpRequest request, UnbreakableContext db) =>
@@ -121,10 +190,18 @@ api.MapGet("/messages/{id:int}", async (int id, UnbreakableContext db) =>
 
 api.MapPost("/messages", async (Message message, HttpRequest request, UnbreakableContext db) =>
 {
-    // Geen afzender meegegeven? Dan nemen we wie je bent.
+    // Opdracht 4: de afzender komt altijd uit het token, nooit uit de body.
+    // Vroeger kon je hier zelf een andere afzender invullen (spoofing).
+    message.Sender = CurrentUser(request);
     if (string.IsNullOrEmpty(message.Sender))
     {
-        message.Sender = CurrentUser(request);
+        return Results.Unauthorized();
+    }
+
+    // De ontvanger is een sub. Die moet bestaan, anders kan niemand het bericht ooit lezen.
+    if (string.IsNullOrEmpty(message.Recipient) || !await db.Users.AnyAsync(u => u.Id == message.Recipient))
+    {
+        return Results.BadRequest("Onbekende ontvanger. Die persoon moet minstens één keer ingelogd hebben.");
     }
 
     // Opdracht 3: de server kan het bericht niet lezen, maar wel controleren dat er
@@ -176,7 +253,8 @@ api.MapDelete("/messages/{id:int}", async (int id, UnbreakableContext db) =>
 
 app.Run();
 
+// Opdracht 4: wie je bent, is de claim "sub" uit het gecontroleerde access token.
 static string CurrentUser(HttpRequest request)
 {
-    return request.Headers["X-User"].ToString();
+    return request.HttpContext.User.FindFirst("sub")?.Value;
 }

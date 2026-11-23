@@ -1,0 +1,2 @@
+keycloak-js 26.2.5 (npm), ongewijzigd overgenomen uit lib/ van het npm-pakket.
+Bijwerken: npm pack keycloak-js@<versie> en lib/keycloak.js + lib/deprecations.js vervangen.

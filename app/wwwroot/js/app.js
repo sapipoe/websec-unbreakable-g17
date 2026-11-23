@@ -1,6 +1,6 @@
 // De schermen van Unbreakable. Navigeren gebeurt met het deel na # in de URL.
 
-import { api, currentUser, setUser } from './api.js';
+import { api, currentUser, initAuth, login, logout } from './api.js';
 import * as otp from './crypto.js';
 
 const app = document.getElementById('app');
@@ -22,12 +22,27 @@ function formatDate(value) {
 
 function showWho() {
     const user = currentUser();
-    document.getElementById('who').innerHTML = user
-        ? `Je bent <strong>${escapeHtml(user)}</strong> (<a href="#/">wisselen</a>)`
+    const who = document.getElementById('who');
+    who.innerHTML = user
+        ? `Je bent <strong>${escapeHtml(user.name)}</strong> (<a href="#" id="logout">uitloggen</a>)`
         : '';
+    if (user) {
+        document.getElementById('logout').addEventListener('click', (event) => {
+            event.preventDefault();
+            logout();
+        });
+    }
 }
 
-// ------------------------------------------------------------------ naam kiezen
+// Opdracht 4: de API werkt met de sub uit het token (een UUID). Om namen te tonen,
+// halen we de lijst gebruikers op en zoeken we bij elke sub de leesbare naam.
+async function loadUsers() {
+    const users = await api.users();
+    const names = new Map(users.map(u => [u.id, u.username]));
+    return { users, nameOf: (id) => names.get(id) || 'onbekend' };
+}
+
+// ------------------------------------------------------------------ inloggen
 
 function renderLogin() {
     const user = currentUser();
@@ -37,26 +52,19 @@ function renderLogin() {
             <p class="lead">Berichten die niemand anders kan lezen. Dat is toch de bedoeling.</p>
         </div>
         <div class="row justify-content-center">
-            <div class="col-md-5">
-                ${user ? `<p>Je gebruikt Unbreakable als <strong>${escapeHtml(user)}</strong>.
-                          <a href="#/inbox">Naar je inbox</a></p>
-                          <p>Iemand anders? Vul hieronder een andere naam in.</p>` : ''}
-                <form id="login">
-                    <div class="form-group">
-                        <label for="name">Wie ben je?</label>
-                        <input id="name" class="form-control" placeholder="bijvoorbeeld Anna"
-                               required minlength="2" maxlength="40" />
-                    </div>
-                    <button type="submit" class="btn btn-primary">Verder</button>
-                </form>
+            <div class="col-md-5 text-center">
+                ${user
+                    ? `<p>Je bent ingelogd als <strong>${escapeHtml(user.name)}</strong>.</p>
+                       <a href="#/inbox" class="btn btn-primary">Naar je inbox</a>`
+                    : `<p>Log in met je account om je berichten te lezen.</p>
+                       <button id="login" class="btn btn-primary">Inloggen</button>`}
             </div>
         </div>`;
 
-    document.getElementById('login').addEventListener('submit', (event) => {
-        event.preventDefault();
-        setUser(document.getElementById('name').value.trim());
-        location.hash = '#/inbox';
-    });
+    if (!user) {
+        // Naar de loginpagina van Keycloak. Daarna komt de browser terug met een code.
+        document.getElementById('login').addEventListener('click', () => login());
+    }
 }
 
 // ------------------------------------------------------------------ inbox
@@ -66,13 +74,14 @@ async function renderInbox(params) {
     const q = params.get('q') || '';
     const from = params.get('from') || '';
 
+    const { nameOf } = await loadUsers();
     const all = await api.inbox();
-    const senders = [...new Set(all.map(m => m.sender))].sort();
+    const senders = [...new Set(all.map(m => m.sender))].sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
     const found = q ? await api.search(q) : all;
     const messages = found.filter(m => !from || m.sender === from);
 
     app.innerHTML = `
-        <h1>Inbox van ${escapeHtml(user)}</h1>
+        <h1>Inbox van ${escapeHtml(user.name)}</h1>
         <p>
             <a href="#/nieuw" class="btn btn-primary">Nieuw bericht</a>
             <button id="export" class="btn btn-outline-secondary">Exporteer als JSON</button>
@@ -83,7 +92,7 @@ async function renderInbox(params) {
                     <label for="from">Van</label>
                     <select id="from" class="form-control">
                         <option value="">Iedereen</option>
-                        ${senders.map(s => `<option value="${escapeHtml(s)}" ${s === from ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('')}
+                        ${senders.map(s => `<option value="${escapeHtml(s)}" ${s === from ? 'selected' : ''}>${escapeHtml(nameOf(s))}</option>`).join('')}
                     </select>
                 </div>
                 <div class="col-auto">
@@ -104,7 +113,7 @@ async function renderInbox(params) {
 
     const rows = messages.map(m => `
         <tr>
-            <td>${escapeHtml(m.sender)}</td>
+            <td>${escapeHtml(nameOf(m.sender))}</td>
             <td><a href="#/bericht/${m.id}">${m.subject}</a></td>
             <td>${formatDate(m.sentAt)}</td>
         </tr>`).join('');
@@ -140,13 +149,14 @@ async function renderInbox(params) {
 // ------------------------------------------------------------------ bericht lezen
 
 async function renderMessage(id) {
+    const { nameOf } = await loadUsers();
     const m = await api.message(id);
 
     app.innerHTML = `
         <h1>${m.subject}</h1>
         <dl class="row">
-            <dt class="col-sm-2">Van</dt><dd class="col-sm-10">${escapeHtml(m.sender)}</dd>
-            <dt class="col-sm-2">Aan</dt><dd class="col-sm-10">${escapeHtml(m.recipient)}</dd>
+            <dt class="col-sm-2">Van</dt><dd class="col-sm-10">${escapeHtml(nameOf(m.sender))}</dd>
+            <dt class="col-sm-2">Aan</dt><dd class="col-sm-10">${escapeHtml(nameOf(m.recipient))}</dd>
             <dt class="col-sm-2">Verzonden</dt><dd class="col-sm-10">${formatDate(m.sentAt)}</dd>
         </dl>
         <h5>Versleuteld bericht</h5>
@@ -211,21 +221,21 @@ async function renderMessage(id) {
 // ------------------------------------------------------------------ bericht versturen
 
 async function renderNew() {
-    const users = await api.users();
+    const { users } = await loadUsers();
 
     app.innerHTML = `
         <h1>Nieuw bericht</h1>
-        <p class="text-muted">Van: ${escapeHtml(currentUser())}</p>
+        <p class="text-muted">Van: ${escapeHtml(currentUser().name)}</p>
         <div class="row">
             <div class="col-md-8">
                 <form id="compose">
                     <div class="form-group">
                         <label for="recipient">Aan</label>
-                        <input id="recipient" class="form-control" list="known-users" autocomplete="off"
-                               required minlength="2" maxlength="40" />
-                        <datalist id="known-users">
-                            ${users.map(u => `<option value="${escapeHtml(u)}"></option>`).join('')}
-                        </datalist>
+                        <select id="recipient" class="form-control" required>
+                            <option value="">Kies een ontvanger</option>
+                            ${users.map(u => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.username)}</option>`).join('')}
+                        </select>
+                        <small class="form-text text-muted">Staat iemand er niet bij? Die moet eerst één keer inloggen.</small>
                     </div>
                     <div class="form-group">
                         <label for="subject">Onderwerp</label>
@@ -266,8 +276,8 @@ async function renderNew() {
             const plain = otp.normalizeMessage(document.getElementById('text').value);
             const key = otp.normalizeKey(document.getElementById('otpkey').value);
             const message = {
-                sender: currentUser(),
-                recipient: document.getElementById('recipient').value.trim(),
+                sender: currentUser().id,                          // je sub; de API neemt die zelf uit het token
+                recipient: document.getElementById('recipient').value, // de sub van de ontvanger
                 subject: document.getElementById('subject').value,
                 keyLine: Number(document.getElementById('keyline').value),
                 body: otp.encrypt(plain, key),     // enkel de ciphertext gaat naar de server
@@ -330,5 +340,12 @@ async function route() {
     }
 }
 
+// Opdracht 4: eerst kijken of je bent ingelogd (of net terugkomt van Keycloak met een code),
+// pas daarna de schermen tonen.
+try {
+    await initAuth();
+} catch (error) {
+    app.innerHTML = `<div class="alert alert-danger">Inloggen is nu niet mogelijk: ${escapeHtml(String(error?.message || error))}</div>`;
+}
 window.addEventListener('hashchange', route);
 route();

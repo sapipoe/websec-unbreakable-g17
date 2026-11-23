@@ -11,4 +11,7 @@ public class UnbreakableContext : DbContext
     }
 
     public DbSet<Message> Messages { get; set; }
+
+    // Opdracht 4: sub uit het token <-> leesbare naam.
+    public DbSet<AppUser> Users { get; set; }
 }
