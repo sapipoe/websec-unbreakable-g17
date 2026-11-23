@@ -68,8 +68,9 @@ jobs:
         run: curl -fsS --retry 36 --retry-delay 5 --retry-all-errors https://g17.ipv6.thelastgym.be/health
 
       - name: Health check Keycloak (via de WAF)
-        # Opdracht 4: staat Keycloak online en geeft het de juiste issuer terug?
+        # Opdracht 4: staat Keycloak online en geeft de realm unbreakable de juiste issuer terug?
+        # (niet master: die werkt bewust enkel via de SSH tunnel, frontendUrl = localhost)
         run: |
           curl -fsS --retry 36 --retry-delay 5 --retry-all-errors \
-            https://g17.ipv6.thelastgym.be/auth/realms/master/.well-known/openid-configuration \
-            | grep -q '"issuer":"https://g17.ipv6.thelastgym.be/auth/realms/master"'
+            https://g17.ipv6.thelastgym.be/auth/realms/unbreakable/.well-known/openid-configuration \
+            | grep -q '"issuer":"https://g17.ipv6.thelastgym.be/auth/realms/unbreakable"'
