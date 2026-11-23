@@ -100,6 +100,7 @@ services:
       # opdracht 4: /auth naar Keycloak (langste prefix wint, dus / blijft naar de app gaan)
       REVERSE_PROXY_URL_1: "/auth"
       REVERSE_PROXY_HOST_1: "http://keycloak:8080"
+      BAD_BEHAVIOR_STATUS_CODES: "400 403 404 405 429 444"
     restart: unless-stopped
     networks:
       - bw-universe
