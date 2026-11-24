@@ -5,12 +5,17 @@ services:
 #      - "8080:8080"
     environment:
       ConnectionStrings__Unbreakable: "Host=db;Port=5432;Database=unbreakable;Username=unbreakable;Password=Unbr3akable!2026"
+      # opdracht 4: OpenFGA is de PDP. Enkel bereikbaar over het interne netwerk authz.
+      # Wordt pas gebruikt vanaf stap 4 (sectie "OpenFga" in de configuratie, zoals "Oidc").
+      OpenFga__ApiUrl: "http://openfga:8080"
+      OpenFga__PresharedKey: ${OPENFGA_PRESHARED_KEY}
     depends_on:
       - db
     restart: unless-stopped
     networks:
         - backend
         - bw-services
+        - authz
   db:
     image: postgres:17
     environment:
@@ -67,6 +72,72 @@ services:
     networks:
       - keycloak
 
+# opdracht 4: OpenFGA als PDP (wie mag welk bericht lezen of verwijderen).
+# NIET publiek: geen ports, niet op bw-services, niet achter BunkerWeb.
+# Enkel de app praat ermee, over het interne netwerk authz.
+  openfga:
+    image: openfga/openfga:v1.23.0
+    command: run
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      # zonder gebruiker en wachtwoord in de URI: die staan apart hieronder
+      OPENFGA_DATASTORE_URI: postgres://openfga-db:5432/openfga?sslmode=disable
+      OPENFGA_DATASTORE_USERNAME: openfga
+      OPENFGA_DATASTORE_PASSWORD: ${OPENFGA_DB_PASSWORD}
+      # elk verzoek moet "Authorization: Bearer <sleutel>" meesturen, anders 401
+      OPENFGA_AUTHN_METHOD: preshared
+      OPENFGA_AUTHN_PRESHARED_KEYS: ${OPENFGA_PRESHARED_KEY}
+      OPENFGA_PLAYGROUND_ENABLED: "false"
+    depends_on:
+      openfga-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # het image heeft geen shell en geen curl, wel grpc_health_probe (gRPC-poort 8081)
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=:8081"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - openfga
+      - authz
+
+# opdracht 4: maakt of updatet de tabellen van OpenFGA en stopt dan.
+# Draait bij elke deploy; is er niets te doen, dan stopt hij meteen.
+  openfga-migrate:
+    image: openfga/openfga:v1.23.0
+    command: migrate
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://openfga-db:5432/openfga?sslmode=disable
+      OPENFGA_DATASTORE_USERNAME: openfga
+      OPENFGA_DATASTORE_PASSWORD: ${OPENFGA_DB_PASSWORD}
+    depends_on:
+      openfga-db:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - openfga
+
+# opdracht 4: aparte databank voor OpenFGA, los van de berichten en van Keycloak
+  openfga-db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: openfga
+      POSTGRES_USER: openfga
+      POSTGRES_PASSWORD: ${OPENFGA_DB_PASSWORD}
+    volumes:
+      - fgadata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openfga -d openfga"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - openfga
+
 # de WAF zelf
   bunkerweb:
     image: bunkerity/bunkerweb:1.6.16
@@ -108,11 +179,17 @@ services:
 volumes:
   dbdata:
   kcdata:
+  fgadata:
   bw-storage:
 
 networks:
   backend:
   keycloak:
+  # opdracht 4: internal = geen verkeer naar of van buiten, enkel tussen de containers erop
+  openfga:          # openfga <-> openfga-db
+    internal: true
+  authz:            # app <-> openfga
+    internal: true
   bw-services:
   bw-universe:
     ipam:

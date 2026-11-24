@@ -1,0 +1,23 @@
+# opdracht 4: autorisatiemodel voor de berichten (OpenFGA is de PDP).
+#
+# - user:<sub>      een gebruiker, <sub> = de claim "sub" uit het Keycloak-token (UUID)
+# - message:<id>    een bericht, <id> = Messages.Id in de databank van de app
+#
+# Per bericht schrijft de API twee tuples weg:
+#   user:<sub van de afzender>   sender     message:<id>
+#   user:<sub van de ontvanger>  recipient  message:<id>
+#
+# Wat mag wie?
+# - lezen (can_read)        = enkel de ONTVANGER. De afzender kan zijn verzonden bericht niet lezen.
+# - verwijderen (can_delete) = enkel de AFZENDER. De ontvanger kan het bericht niet verwijderen.
+# Iemand die geen sender of recipient is, mag niets (standaard geweigerd).
+
+model
+  schema 1.1
+type user
+type message
+  relations
+    define sender: [user]
+    define recipient: [user]
+    define can_read: recipient
+    define can_delete: sender

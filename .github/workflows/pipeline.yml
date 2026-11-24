@@ -56,10 +56,36 @@ jobs:
           KC_ADMIN_USER: ${{ secrets.KC_ADMIN_USER }}
           KC_ADMIN_PASSWORD: ${{ secrets.KC_ADMIN_PASSWORD }}
           KC_DB_PASSWORD: ${{ secrets.KC_DB_PASSWORD }}
+          # Opdracht 4: OpenFGA (PDP). Wachtwoord van zijn databank en de sleutel waarmee de app zich aanmeldt.
+          OPENFGA_DB_PASSWORD: ${{ secrets.OPENFGA_DB_PASSWORD }}
+          OPENFGA_PRESHARED_KEY: ${{ secrets.OPENFGA_PRESHARED_KEY }}
         # -p unbreakable: vaste projectnaam, zodat elke deploy dezelfde containers vervangt
         # --build: de image opnieuw bouwen met de nieuwe code
         # -d: op de achtergrond draaien
         run: docker compose -p unbreakable up -d --build --remove-orphans
+
+      - name: Health check OpenFGA (intern)
+        # Opdracht 4: OpenFGA heeft bewust geen publieke poort, dus geen curl via de WAF.
+        # We vragen aan Docker de status van de healthcheck (grpc_health_probe) van de container.
+        # Max. 3 minuten wachten; wordt hij niet "healthy", dan faalt de deploy en tonen we de logs.
+        run: |
+          id=$(docker ps -aq --filter label=com.docker.compose.project=unbreakable \
+                            --filter label=com.docker.compose.service=openfga)
+          if [ -z "$id" ]; then
+            echo "::error::geen openfga-container gevonden"
+            exit 1
+          fi
+          for i in $(seq 1 36); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$id" 2>/dev/null || echo onbekend)
+            echo "poging $i: openfga is $status"
+            if [ "$status" = "healthy" ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::OpenFGA werd niet healthy binnen 3 minuten"
+          docker logs --tail 50 "$id" || true
+          exit 1
 
       - name: Health check (via de WAF)
         # Controleren of de nieuwe versie online staat, via de WAF op ons domein (poort 8080 is dicht).
