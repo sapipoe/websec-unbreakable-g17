@@ -144,3 +144,6 @@ Hex, omdat OpenFGA de lijst van sleutels op komma's splitst en `+ / =` in een he
 URL soms problemen geven. Let op: Postgres zet het wachtwoord enkel bij de **eerste** start
 van een leeg volume. Wijzig je `OPENFGA_DB_PASSWORD` later, dan moet je het ook in de
 databank zelf aanpassen (`ALTER USER openfga PASSWORD ...`).
+
+  store-ID: 01M875E2QF8D6MJ2PQ6YRQ2C74
+  model-ID: 01M875E2QQ8PPCV1JC3K9PE19K
